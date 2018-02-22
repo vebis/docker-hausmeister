@@ -1,0 +1,29 @@
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+   name: docker-hausmeister
+   namespace: kube-system
+spec:
+  template:
+    metadata:
+      labels:
+        name: docker-hausmeister
+    spec:
+      containers:
+      - name: docker-hausmeister
+        image: vebis/docker-hausmeister
+        env:
+        - name: "HM_UNTIL"
+          value: "604800"
+        - name: "HM_ENFORCING"
+          value: "0"
+        - name: "HM_DELETE_DANGLING"
+          value: "1"
+        volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+      volumes:
+      - name: docker-socket
+        hostPath:
+          path: /var/run/docker.sock
