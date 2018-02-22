@@ -1,0 +1,12 @@
+version: '2.3'
+
+services:
+    hausmeister:
+        image: vebis/docker-hausmeister:1.0.0
+        env_file:
+            - assets/env/hausmeister.env
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+        privileged: false
+        restart:    always
+        tty:        true
