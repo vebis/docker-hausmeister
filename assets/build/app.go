@@ -67,6 +67,7 @@ func getImageId(s string) string {
     }
     cmd.Wait()
 
+    log.Printf("[getImageId] image name '%s' mapped to image id '%s'", s, id)
     return id
 }
 
@@ -76,11 +77,13 @@ func updateImageHistory(image_id string) {
     return
 }
 
-func rmImage(image_id string) {
-    // check if not in use
+func checkForRunningContainer(image_id string, all bool) bool {
     var container_ids []string
     s := []string{"ancestor=", image_id}
-    cmd := exec.Command("docker", "ps", "-a", "-q", "--filter", strings.Join(s,""))
+    cmd := exec.Command("docker", "ps", "-q", "--filter", strings.Join(s,""))
+    if all == true {
+        cmd = exec.Command("docker", "ps", "-a", "-q", "--filter", strings.Join(s,""))
+    }
     cmd.Stderr = os.Stderr
     stdout, err := cmd.StdoutPipe()
     if nil != err {
@@ -99,49 +102,49 @@ func rmImage(image_id string) {
     }
     cmd.Wait()
 
-    if len(container_ids) > 0 && hm_enforcing == 0 {
-        log.Print("Do nothing. Some containers are running or stopped!")
+    var ret bool
+    if len(container_ids) > 0 {
+        ret = true
+    } else {
+        ret = false
+    }
 
-        return
+/*  DEBUG
+    log.Printf("[checkForRunningContainer] result for image id '%s' and flag all %s => %s", image_id, all, ret)
+*/
+    return ret
+}
+
+func rmImage(image_id string) {
+    // check if not in use
+    if checkForRunningContainer(image_id, true) {
+        if hm_enforcing == 0 {
+            log.Print("Do nothing. Some containers are running or stopped!")
+
+            return
+        } else {
+            log.Print("Some containers are running or stopped.")
+        }
     } else {
         log.Print("Found no running containers. Proceeding...")
     }
 
     // if in use by stopped container decide on HM_ENFORCING
-    var container_id []string
-    cmd = exec.Command("docker", "ps", "-q", "--filter", strings.Join(s,""))
-    cmd.Stderr = os.Stderr
-    stdout, err = cmd.StdoutPipe()
-    if nil != err {
-        log.Fatalf("Error obtaining stdout: %s", err.Error())
-    }
-    reader = bufio.NewReader(stdout)
-    go func(reader io.Reader) {
-        scanner := bufio.NewScanner(reader)
-        for scanner.Scan() {
-            container_id = append(container_id, scanner.Text())
-        }
-    }(reader)
-
-    if err := cmd.Start(); nil != err {
-        log.Fatalf("Error starting program: %s, %s", cmd.Path, err.Error())
-    }
-    cmd.Wait()
-
-    if len(container_id) > 0 {
+    if checkForRunningContainer(image_id, false) {
         log.Print("Do nothing. Some containers are running!")
 
         return
     }
+
     // delete image
     log.Print("trying to delete image now")
-    cmd = exec.Command("docker", "image", "rm", "-f", image_id)
+    cmd := exec.Command("docker", "image", "rm", "-f", image_id)
     cmd.Stderr = os.Stderr
-    stdout, err = cmd.StdoutPipe()
+    stdout, err := cmd.StdoutPipe()
     if nil != err {
         log.Fatalf("Error obtaining stdout: %s", err.Error())
     }
-    reader = bufio.NewReader(stdout)
+    reader := bufio.NewReader(stdout)
     go func(reader io.Reader) {
         scanner := bufio.NewScanner(reader)
         for scanner.Scan() {
@@ -155,9 +158,8 @@ func rmImage(image_id string) {
     cmd.Wait()
 
     // remove image_id from image_history map
-
     if getImageId(image_id) == "" {
-        log.Print("image seems to be deleted")
+        log.Print("Image seems to be deleted")
         delete(image_history, image_id)
     }
 
@@ -175,6 +177,38 @@ func deleteOldImages() {
             rmImage(image_id)
         }
     }
+
+    return
+}
+
+func deleteGrandFatheredImages() {
+    var image_id string
+    cmd := exec.Command("docker", "image", "ls", "--format", "'{{.ID}}'")
+    cmd.Stderr = os.Stderr
+    stdout, err := cmd.StdoutPipe()
+    if nil != err {
+        log.Fatalf("Error obtaining stdout: %s", err.Error())
+    }
+    reader := bufio.NewReader(stdout)
+    go func(reader io.Reader) {
+        scanner := bufio.NewScanner(reader)
+        for scanner.Scan() {
+            image_id = cleanJson(scanner.Text())
+            log.Print("  working on image: ", image_id)
+            if _, ok := image_history[image_id]; ok {
+                log.Print("Image is not grandfathered. Skipping!")
+
+                continue
+            } else {
+                rmImage(image_id)
+            }
+        }
+    }(reader)
+
+    if err := cmd.Start(); nil != err {
+        log.Fatalf("Error starting program: %s, %s", cmd.Path, err.Error())
+    }
+    cmd.Wait()
 
     return
 }
@@ -226,13 +260,13 @@ func handleEvent(s string) {
 
     deleteOldImages()
 
-    if getCurTimestamp()>start_time+int64(hm_until) && hm_enforcing == 1 {
-        // TODO: implement something useful
-        log.Print("Trying to delete images without received start event")
-    }
-
     if hm_delete_dangling == 1 {
         deleteDanglingImages()
+    }
+
+    if getCurTimestamp()>start_time+int64(hm_until) && hm_enforcing == 1 {
+        log.Print("Trying to delete images without received start event")
+        deleteGrandFatheredImages()
     }
 }
 
