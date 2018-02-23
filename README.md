@@ -28,7 +28,7 @@ kubectl apply -f docker-hausmeister.yml
 ```
 
 ### Native
-Make sure to be in the docker group
+Make sure to be member of the docker group
 ```
 sudo HM_UNTIL=604800 HM_ENFORCING=0 HM_DELETE_DANGLING=1 ./app
 ```
