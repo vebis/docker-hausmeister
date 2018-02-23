@@ -13,7 +13,12 @@ It monitors container creation events for used images and keeps track of last us
 ### Docker
 Run as a container (don't forget to mount the docker socket into the container):
 ```
-sudo docker run -v /var/run/docker.sock:/var/run/docker.sock vebis/docker-hausmeister
+sudo docker run \
+  -e HM_UNTIL=604800 \
+  -e HM_ENFORCING=0 \
+  -e HM_DELETE_DANGLING=1 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  vebis/docker-hausmeister
 ```
 
 ### Kubernetes
