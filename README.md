@@ -35,7 +35,7 @@ sudo HM_UNTIL=604800 HM_ENFORCING=0 HM_DELETE_DANGLING=1 ./app
 ## Important Notes
 
 * you want to use HM_ENFORCING=1 because otherwise stopped containers will keep either unused images in the system
-* if you are doing multi-stage build, you have to run with HM_DELETE_DANGLING=1 because the all finished stages will be dangling if the next starts
+* if you are doing multi-stage builds, you have to run with HM_DELETE_DANGLING=1 because the all finished stages will be dangling if the next starts
 
 ## Author
 
