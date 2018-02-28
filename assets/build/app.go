@@ -76,9 +76,9 @@ func hasRunningContainers(imageId string) bool {
 func hasStoppedContainers(imageId string) bool {
     if checkForRunningContainer(imageId, false) == false && checkForRunningContainer(imageId, true) == true {
 	return true
-    } else {
-        return false
     }
+
+    return false
 }
 
 func rmImage(imageId string) {
