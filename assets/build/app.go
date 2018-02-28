@@ -16,12 +16,12 @@ import (
 
 var start_time int64
 var hm_until int
-var hm_delete_dangling int
 var image_history = make(map[string]int64)
 
 var cli *client.Client
 
 var enforcing bool
+var delete_dangling bool
 
 func getCurTimestamp() int64 {
     return int64(time.Now().Unix())
@@ -185,7 +185,7 @@ func handleEvent(image_name string) {
 
     deleteOldImages()
 
-    if hm_delete_dangling == 1 {
+    if delete_dangling {
         deleteDanglingImages()
     }
 
@@ -199,7 +199,7 @@ func main() {
 
     // set defaults
     hm_until = 7*24*60*60 // 1 week
-    hm_delete_dangling = 1
+    hm_delete_dangling := 1
     hm_enforcing := 0
     docker_socket := "/var/run/docker.sock"
 
@@ -225,6 +225,12 @@ func main() {
         if (err == nil) {
             hm_delete_dangling = t_hm_delete_dangling
         }
+    }
+
+    if hm_delete_dangling == 1 {
+        delete_dangling = true
+    } else {
+        delete_dangling = false
     }
 
     if os.Getenv("HM_ENFORCING") == "" {
