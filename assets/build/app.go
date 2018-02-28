@@ -14,43 +14,43 @@ import (
     "github.com/docker/docker/client"
 )
 
-var start_time int64
-var hm_until int
-var image_history = make(map[string]int64)
+var startTime int64
+var hmUntil int
+var imageHistory = make(map[string]int64)
 
 var cli *client.Client
 
 var enforcing bool
-var delete_dangling bool
+var deleteDangling bool
 
 func getCurTimestamp() int64 {
     return int64(time.Now().Unix())
 }
 
-func getImageId(image_name string) string {
+func getImageId(imageName string) string {
     id := ""
 
-    image, bytes, err := cli.ImageInspectWithRaw(context.Background(), image_name)
+    image, bytes, err := cli.ImageInspectWithRaw(context.Background(), imageName)
     if err != nil || len(bytes) == 0 {
         return id
     }
 
     id = image.ID
 
-    log.Printf("Image name '%s' mapped to image id '%s'", image_name, id)
+    log.Printf("Image name '%s' mapped to image id '%s'", imageName, id)
 
     return id
 }
 
-func updateImageHistory(image_id string) {
-    image_history[image_id] = getCurTimestamp()
+func updateImageHistory(imageId string) {
+    imageHistory[imageId] = getCurTimestamp()
 
     return
 }
 
-func checkForRunningContainer(image_id string, all bool) bool {
+func checkForRunningContainer(imageId string, all bool) bool {
     filter := filters.NewArgs()
-    filter.Add("ancestor", image_id)
+    filter.Add("ancestor", imageId)
     options := types.ContainerListOptions{Quiet: true, All: all, Filters : filter }
 
     containers, err := cli.ContainerList(context.Background(), options)
@@ -69,32 +69,32 @@ func checkForRunningContainer(image_id string, all bool) bool {
     return ret
 }
 
-func hasRunningContainers(image_id string) bool {
-    return checkForRunningContainer(image_id, false)
+func hasRunningContainers(imageId string) bool {
+    return checkForRunningContainer(imageId, false)
 }
 
-func hasStoppedContainers(image_id string) bool {
-    if checkForRunningContainer(image_id, false) == false && checkForRunningContainer(image_id, true) == true {
+func hasStoppedContainers(imageId string) bool {
+    if checkForRunningContainer(imageId, false) == false && checkForRunningContainer(imageId, true) == true {
 	return true
     } else {
         return false
     }
 }
 
-func rmImage(image_id string) {
-    if hasRunningContainers(image_id) {
+func rmImage(imageId string) {
+    if hasRunningContainers(imageId) {
         log.Print("    Some containers are running. Skipping!")
 
         return
     }
 
-    if hasStoppedContainers(image_id) && !enforcing {
+    if hasStoppedContainers(imageId) && !enforcing {
         log.Print("    Some containers are stopped. Skipping!")
 
         return
     }
 
-    imagedeleteresponses, err := cli.ImageRemove(context.Background(), image_id, types.ImageRemoveOptions{Force:true})
+    imagedeleteresponses, err := cli.ImageRemove(context.Background(), imageId, types.ImageRemoveOptions{Force:true})
     if err != nil {
       log.Print(err)
     }
@@ -107,24 +107,24 @@ func rmImage(image_id string) {
         }
     }
 
-    // remove image_id from image_history map
-    if getImageId(image_id) == "" {
+    // remove imageId from imageHistory map
+    if getImageId(imageId) == "" {
         log.Print("  Image seems to be deleted")
-        delete(image_history, image_id)
+        delete(imageHistory, imageId)
     }
 
     return
 }
 
 func deleteOldImages() {
-    cur_time := getCurTimestamp()
+    curTime := getCurTimestamp()
     log.Print("Searching for old images:")
 
-    for image_id, last := range image_history {
-        log.Printf("  trying image: %s", image_id)
-        if last < cur_time-int64(hm_until) {
+    for imageId, last := range imageHistory {
+        log.Printf("  trying image: %s", imageId)
+        if last < curTime-int64(hmUntil) {
             log.Print("    Image is to old, deleting.")
-            rmImage(image_id)
+            rmImage(imageId)
         } else {
             log.Print("    Image is to new. Skipping.")
         }
@@ -135,7 +135,7 @@ func deleteOldImages() {
 
 func deleteGrandFatheredImages() {
     log.Print("Trying to delete images without received start event")
-    var image_id string
+    var imageId string
 
     images, err := cli.ImageList(context.Background(), types.ImageListOptions{})
     if err != nil {
@@ -145,14 +145,14 @@ func deleteGrandFatheredImages() {
     }
 
     for _, image := range images {
-        image_id = image.ID
-        log.Print("  trying image: ", image_id)
-        if _, ok := image_history[image_id]; ok {
+        imageId = image.ID
+        log.Print("  trying image: ", imageId)
+        if _, ok := imageHistory[imageId]; ok {
             log.Print("    Image is not grandfathered. Skipping!")
 
             continue
         } else {
-            rmImage(image_id)
+            rmImage(imageId)
         }
     }
 
@@ -170,38 +170,38 @@ func deleteDanglingImages() {
     log.Print("  Space reclaimed: ", prunereport.SpaceReclaimed)
 }
 
-func handleEvent(image_name string) {
-    log.Printf("Handle event for image '%s'",  image_name)
+func handleEvent(imageName string) {
+    log.Printf("Handle event for image '%s'",  imageName)
 
-    image_id := getImageId(image_name)
+    imageId := getImageId(imageName)
 
-    if image_id == "" {
+    if imageId == "" {
        log.Print("Could not find image id")
 
        return
     }
 
-    updateImageHistory(image_id)
+    updateImageHistory(imageId)
 
     deleteOldImages()
 
-    if delete_dangling {
+    if deleteDangling {
         deleteDanglingImages()
     }
 
-    if getCurTimestamp()>start_time+int64(hm_until) && enforcing {
+    if getCurTimestamp()>startTime+int64(hmUntil) && enforcing {
         deleteGrandFatheredImages()
     }
 }
 
 func main() {
-    start_time = getCurTimestamp()
+    startTime = getCurTimestamp()
 
     // set defaults
-    hm_until = 7*24*60*60 // 1 week
-    hm_delete_dangling := 1
-    hm_enforcing := 0
-    docker_socket := "/var/run/docker.sock"
+    hmUntil = 7*24*60*60 // 1 week
+    hmDeleteDangling := 1
+    hmEnforcing := 0
+    dockerSocket := "/var/run/docker.sock"
 
     log.Print("Starting docker hausmeister ...")
 
@@ -210,52 +210,52 @@ func main() {
     if os.Getenv("HM_UNTIL") == "" {
         log.Print("No HM_UNTIL defined, using default")
     } else {
-        t_hm_until, err := strconv.Atoi(os.Getenv("HM_UNTIL"))
+        tHmUntil, err := strconv.Atoi(os.Getenv("HM_UNTIL"))
 
         if (err == nil) {
-            hm_until = t_hm_until
+            hmUntil = tHmUntil
         }
     }
 
     if os.Getenv("HM_DELETE_DANGLING") == "" {
         log.Print("No HM_DELETE_DANGLING defined")
     } else {
-        t_hm_delete_dangling, err := strconv.Atoi(os.Getenv("HM_DELETE_DANGLING"))
+        tHmDeleteDangling, err := strconv.Atoi(os.Getenv("HM_DELETE_DANGLING"))
 
         if (err == nil) {
-            hm_delete_dangling = t_hm_delete_dangling
+            hmDeleteDangling = tHmDeleteDangling
         }
     }
 
-    if hm_delete_dangling == 1 {
-        delete_dangling = true
+    if hmDeleteDangling == 1 {
+        deleteDangling = true
     } else {
-        delete_dangling = false
+        deleteDangling = false
     }
 
     if os.Getenv("HM_ENFORCING") == "" {
         log.Print("No HM_ENFORCING defined")
     } else {
-        t_hm_enforcing, err := strconv.Atoi(os.Getenv("HM_ENFORCING"))
+        tHmEnforcing, err := strconv.Atoi(os.Getenv("HM_ENFORCING"))
 
         if (err == nil) {
-            hm_enforcing = t_hm_enforcing
+            hmEnforcing = tHmEnforcing
         }
     }
 
-    if hm_enforcing == 1 {
+    if hmEnforcing == 1 {
         enforcing = true
     } else {
         enforcing = false
     }
 
     log.Print("Configuration:")
-    log.Print(" HM_UNTIL           : ", hm_until)
-    log.Print(" HM_DELETE_DANGLING : ", hm_delete_dangling)
-    log.Print(" HM_ENFORCING       : ", hm_enforcing)
+    log.Print(" HM_UNTIL           : ", hmUntil)
+    log.Print(" HM_DELETE_DANGLING : ", hmDeleteDangling)
+    log.Print(" HM_ENFORCING       : ", hmEnforcing)
 
-    if _, err := os.Stat(docker_socket); os.IsNotExist(err) {
-        log.Fatal("Docker socket does not exist at ", docker_socket)
+    if _, err := os.Stat(dockerSocket); os.IsNotExist(err) {
+        log.Fatal("Docker socket does not exist at ", dockerSocket)
     } else {
         log.Print("Docker socket exists")
     }
