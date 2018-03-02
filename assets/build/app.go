@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -23,15 +24,27 @@ var cli *client.Client
 var enforcing bool
 var deleteDangling bool
 
+var exImageNamePrefix []string
+var exImageNameSuffix []string
+var exImageTagPrefix []string
+var exImageTagSuffix []string
+var exImageLabel []string
+
 func getCurTimestamp() int64 {
 	return int64(time.Now().Unix())
+}
+
+func getImageInspect(imageId string) (types.ImageInspect, error) {
+	image, _, err := cli.ImageInspectWithRaw(context.Background(), imageId)
+
+	return image, err
 }
 
 func getImageId(imageName string) string {
 	id := ""
 
-	image, bytes, err := cli.ImageInspectWithRaw(context.Background(), imageName)
-	if err != nil || len(bytes) == 0 {
+	image, err := getImageInspect(imageName)
+	if err != nil {
 		return id
 	}
 
@@ -81,7 +94,98 @@ func hasStoppedContainers(imageId string) bool {
 	return false
 }
 
+func getRepoTags(imageId string) []string {
+	var ret []string
+
+	image, err := getImageInspect(imageId)
+	if err == nil {
+		ret = image.RepoTags
+	}
+
+	return ret
+}
+
+func getLabels(imageId string) map[string]string {
+	ret := make(map[string]string)
+
+	image, err := getImageInspect(imageId)
+	if err == nil {
+		ret = image.Config.Labels
+	}
+
+	return ret
+}
+
+func getExcludeLabel(imageId string) string {
+	ret := ""
+
+	labels := getLabels(imageId)
+
+	if _, ok := labels["exclude"]; ok {
+		ret = labels["exclude"]
+	}
+
+	return ret
+}
+
+func checkExcludeImageByPrefix(e []string, s string) bool {
+	for _, v := range e {
+		if strings.HasPrefix(s, v) == true {
+			return true
+		}
+	}
+
+	return false
+}
+
+func checkExcludeImageBySuffix(e []string, s string) bool {
+	for _, v := range e {
+		if strings.HasSuffix(s, v) == true {
+			return true
+		}
+	}
+
+	return false
+}
+
+func checkExcludeImageByValue(e []string, s string) bool {
+	for _, v := range e {
+		if v == s {
+			return true
+		}
+	}
+
+	return false
+}
+
+// checks if image is excluded -> returns true if it is
+func checkExcludedImage(imageId string) bool {
+	repoTags := getRepoTags(imageId)
+
+	for _, repoTag := range repoTags {
+		s := strings.Split(repoTag, ":")
+		tag := s[len(s)-1]
+		name := strings.Replace(repoTag, ":"+tag, "", 1)
+
+		if checkExcludeImageByPrefix(exImageNamePrefix, name) || checkExcludeImageByPrefix(exImageTagPrefix, tag) || checkExcludeImageBySuffix(exImageNameSuffix, name) || checkExcludeImageBySuffix(exImageTagSuffix, tag) {
+			return true
+		}
+	}
+
+	if checkExcludeImageByValue(exImageLabel, getExcludeLabel(imageId)) {
+		return true
+	}
+
+	return false
+}
+
 func rmImage(imageId string) {
+	if checkExcludedImage(imageId) {
+		log.Print("    Image is excluded from deletion. Skipping!")
+
+		return
+	}
+
 	if hasRunningContainers(imageId) {
 		log.Print("    Some containers are running. Skipping!")
 
@@ -123,7 +227,7 @@ func deleteOldImages() {
 	for imageId, last := range imageHistory {
 		log.Printf("  trying image: %s", imageId)
 		if last < curTime-int64(hmUntil) {
-			log.Print("    Image is to old, deleting.")
+			log.Print("    Image is to old. Trying to delete.")
 			rmImage(imageId)
 		} else {
 			log.Print("    Image is to new. Skipping.")
@@ -194,6 +298,24 @@ func handleEvent(imageName string) {
 	}
 }
 
+func parseExcludeParameters() {
+	if os.Getenv("HM_EX_IMAGENAMEPREFIX") != "" {
+		exImageNamePrefix = strings.Split(os.Getenv("HM_EX_IMAGENAMEPREFIX"), ",")
+	}
+	if os.Getenv("HM_EX_IMAGENAMESUFFIX") != "" {
+		exImageNameSuffix = strings.Split(os.Getenv("HM_EX_IMAGENAMESUFFIX"), ",")
+	}
+	if os.Getenv("HM_EX_IMAGETAGPREFIX") != "" {
+		exImageTagPrefix = strings.Split(os.Getenv("HM_EX_IMAGETAGPREFIX"), ",")
+	}
+	if os.Getenv("HM_EX_IMAGETAGSUFFIX") != "" {
+		exImageTagSuffix = strings.Split(os.Getenv("HM_EX_IMAGETAGSUFFIX"), ",")
+	}
+	if os.Getenv("HM_EX_IMAGELABEL") != "" {
+		exImageLabel = strings.Split(os.Getenv("HM_EX_IMAGELABEL"), ",")
+	}
+}
+
 func main() {
 	startTime = getCurTimestamp()
 
@@ -253,6 +375,8 @@ func main() {
 	log.Print(" HM_UNTIL           : ", hmUntil)
 	log.Print(" HM_DELETE_DANGLING : ", hmDeleteDangling)
 	log.Print(" HM_ENFORCING       : ", hmEnforcing)
+
+	parseExcludeParameters()
 
 	if _, err := os.Stat(dockerSocket); os.IsNotExist(err) {
 		log.Fatal("Docker socket does not exist at ", dockerSocket)
