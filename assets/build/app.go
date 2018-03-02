@@ -55,7 +55,7 @@ func checkForRunningContainer(imageId string, all bool) bool {
 
 	containers, err := cli.ContainerList(context.Background(), options)
 
-	ret := true // save default
+	ret := true // set save default
 	if err != nil {
 		log.Print(err)
 
